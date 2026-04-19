@@ -2,32 +2,29 @@
 
 import { useRef, useEffect } from "react";
 import { Message, Scenario } from "@/types";
-import { MessageBubble, TypingIndicator } from "./MessageBubble";
+import { ChatBubble } from "./ChatBubble";
 
-interface ChatInterfaceProps {
+interface ConversationViewProps {
   messages: Message[];
-  isLoading: boolean;
   currentScenario: Scenario | null;
   onSpeak: (text: string) => void;
   isSpeaking: boolean;
   onOpenScenarios: () => void;
 }
 
-export function ChatInterface({
+export function ConversationView({
   messages,
-  isLoading,
   currentScenario,
   onSpeak,
   isSpeaking,
   onOpenScenarios,
-}: ChatInterfaceProps) {
+}: ConversationViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages]);
 
-  // Empty state
   if (messages.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-4 py-12 text-center">
@@ -38,13 +35,14 @@ export function ChatInterface({
           Hi! I&apos;m Luna, your English tutor
         </h2>
         <p className="mb-6 max-w-sm text-sm text-slate-400">
-          Practice speaking English in a safe, encouraging space. I&apos;ll help correct
-          your grammar, introduce new vocabulary, and keep the conversation flowing.
+          Practice speaking English in a safe, encouraging space. I&apos;ll correct your grammar
+          gently, introduce new vocabulary, and keep the conversation flowing.
         </p>
-        <div className="mb-8 grid w-full max-w-sm grid-cols-1 gap-2 sm:grid-cols-2">
+
+        <div className="mb-8 grid w-full max-w-sm grid-cols-2 gap-2">
           {[
             { icon: "🎙️", text: "Speak with your mic" },
-            { icon: "⌨️", text: "Or type your message" },
+            { icon: "⌨️", text: "Or type a message" },
             { icon: "✏️", text: "Get gentle corrections" },
             { icon: "📚", text: "Learn new vocabulary" },
           ].map((item) => (
@@ -57,9 +55,10 @@ export function ChatInterface({
             </div>
           ))}
         </div>
+
         <button
           onClick={onOpenScenarios}
-          className="rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white shadow-lg transition hover:bg-indigo-500"
+          className="rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white shadow-lg transition hover:bg-indigo-500 active:scale-95"
         >
           🎭 Choose a scenario to start
         </button>
@@ -72,8 +71,7 @@ export function ChatInterface({
 
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-4 md:px-6">
-      {/* Scenario badge */}
-      {currentScenario && currentScenario.id && (
+      {currentScenario?.id && (
         <div className="flex justify-center">
           <span className="rounded-full bg-indigo-600/20 px-3 py-1 text-xs text-indigo-400 ring-1 ring-indigo-500/30">
             {currentScenario.icon} {currentScenario.title}
@@ -82,7 +80,7 @@ export function ChatInterface({
       )}
 
       {messages.map((msg) => (
-        <MessageBubble
+        <ChatBubble
           key={msg.id}
           message={msg}
           onSpeak={onSpeak}
@@ -90,7 +88,6 @@ export function ChatInterface({
         />
       ))}
 
-      {isLoading && <TypingIndicator />}
       <div ref={bottomRef} />
     </div>
   );

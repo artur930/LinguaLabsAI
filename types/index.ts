@@ -28,8 +28,7 @@ export interface VocabularyWord {
   example: string;
 }
 
-export interface TutorResponse {
-  message: string;
+export interface TutorMeta {
   corrections: Correction[];
   vocabulary: VocabularyWord | null;
 }
@@ -37,8 +36,12 @@ export interface TutorResponse {
 export interface Message {
   id: string;
   role: "user" | "assistant";
+  /** Raw text content used for the AI context window */
   content: string;
-  tutorData?: TutorResponse;
+  /** Parsed tutor metadata (corrections + vocabulary) — assistant only */
+  meta?: TutorMeta;
+  /** Whether this message is currently being streamed */
+  streaming?: boolean;
   timestamp: Date;
 }
 
@@ -106,3 +109,10 @@ export interface SessionStats {
   correctionsReceived: number;
   startTime: Date;
 }
+
+/** SSE event types from /api/chat */
+export type StreamEvent =
+  | { type: "text"; content: string }
+  | { type: "meta"; corrections: Correction[]; vocabulary: VocabularyWord | null }
+  | { type: "error"; message: string }
+  | { type: "done" };

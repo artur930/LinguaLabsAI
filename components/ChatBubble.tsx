@@ -2,15 +2,14 @@
 
 import { Message } from "@/types";
 
-interface MessageBubbleProps {
+interface ChatBubbleProps {
   message: Message;
   onSpeak: (text: string) => void;
   isSpeaking: boolean;
 }
 
-export function MessageBubble({ message, onSpeak, isSpeaking }: MessageBubbleProps) {
+export function ChatBubble({ message, onSpeak, isSpeaking }: ChatBubbleProps) {
   const isUser = message.role === "user";
-  const { tutorData } = message;
 
   const timeStr = message.timestamp.toLocaleTimeString([], {
     hour: "2-digit",
@@ -18,7 +17,9 @@ export function MessageBubble({ message, onSpeak, isSpeaking }: MessageBubblePro
   });
 
   return (
-    <div className={`flex animate-slide-up gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+    <div
+      className={`flex animate-slide-up gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+    >
       {/* Avatar */}
       <div
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm ${
@@ -30,8 +31,10 @@ export function MessageBubble({ message, onSpeak, isSpeaking }: MessageBubblePro
         {isUser ? "👤" : "🌙"}
       </div>
 
-      <div className={`flex max-w-[75%] flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}>
-        {/* Main bubble */}
+      <div
+        className={`flex max-w-[76%] flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
+      >
+        {/* Message bubble */}
         <div
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
@@ -39,16 +42,23 @@ export function MessageBubble({ message, onSpeak, isSpeaking }: MessageBubblePro
               : "glass rounded-tl-sm text-slate-100"
           }`}
         >
-          <p>{isUser ? message.content : tutorData?.message ?? message.content}</p>
+          {message.streaming ? (
+            <>
+              <span>{message.content}</span>
+              <span className="ml-0.5 inline-block h-3 w-0.5 animate-pulse bg-indigo-400 align-middle" />
+            </>
+          ) : (
+            <span>{message.content}</span>
+          )}
         </div>
 
-        {/* Corrections */}
-        {!isUser && tutorData && tutorData.corrections.length > 0 && (
+        {/* Grammar corrections */}
+        {!isUser && message.meta && message.meta.corrections.length > 0 && (
           <div className="w-full rounded-xl border border-amber-500/20 bg-amber-500/8 p-3 text-xs">
             <p className="mb-2 flex items-center gap-1.5 font-semibold text-amber-400">
               <span>✏️</span> Grammar Note
             </p>
-            {tutorData.corrections.map((c, i) => (
+            {message.meta.corrections.map((c, i) => (
               <div key={i} className="mb-1.5 last:mb-0">
                 <span className="line-through text-slate-400">{c.original}</span>
                 <span className="mx-1.5 text-slate-500">→</span>
@@ -60,32 +70,32 @@ export function MessageBubble({ message, onSpeak, isSpeaking }: MessageBubblePro
         )}
 
         {/* Vocabulary */}
-        {!isUser && tutorData?.vocabulary && (
+        {!isUser && message.meta?.vocabulary && (
           <div className="w-full rounded-xl border border-emerald-500/20 bg-emerald-500/8 p-3 text-xs">
             <p className="mb-1.5 flex items-center gap-1.5 font-semibold text-emerald-400">
               <span>📚</span> New Vocabulary
             </p>
             <div className="flex flex-wrap items-baseline gap-1.5">
-              <span className="font-semibold text-emerald-300">{tutorData.vocabulary.word}</span>
-              {tutorData.vocabulary.phonetic && (
-                <span className="text-slate-500">{tutorData.vocabulary.phonetic}</span>
+              <span className="font-semibold text-emerald-300">
+                {message.meta.vocabulary.word}
+              </span>
+              {message.meta.vocabulary.phonetic && (
+                <span className="text-slate-500">{message.meta.vocabulary.phonetic}</span>
               )}
             </div>
-            <p className="mt-1 text-slate-300">{tutorData.vocabulary.definition}</p>
-            <p className="mt-1 italic text-slate-400">"{tutorData.vocabulary.example}"</p>
+            <p className="mt-1 text-slate-300">{message.meta.vocabulary.definition}</p>
+            <p className="mt-1 italic text-slate-400">"{message.meta.vocabulary.example}"</p>
           </div>
         )}
 
-        {/* Footer: time + speak button */}
+        {/* Footer */}
         <div className={`flex items-center gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
           <span className="text-[10px] text-slate-600">{timeStr}</span>
-          {!isUser && (
+          {!isUser && !message.streaming && (
             <button
-              onClick={() => onSpeak(tutorData?.message ?? message.content)}
+              onClick={() => onSpeak(message.content)}
               className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] transition ${
-                isSpeaking
-                  ? "text-indigo-400"
-                  : "text-slate-500 hover:text-indigo-400"
+                isSpeaking ? "text-indigo-400" : "text-slate-500 hover:text-indigo-400"
               }`}
               title="Read aloud"
             >
