@@ -12,6 +12,7 @@ import {
 } from "@/types";
 import { useSpeechSynthesis } from "@/lib/speechUtils";
 import { countWords } from "@/lib/speechUtils";
+import { useLang } from "@/lib/context";
 import { Header } from "@/components/Header";
 import { ConversationView } from "@/components/ConversationView";
 import { MicButton } from "@/components/MicButton";
@@ -50,6 +51,7 @@ export default function Home() {
 
   const { speak, isSpeaking } = useSpeechSynthesis();
   const streamingIdRef = useRef<string | null>(null);
+  const { t } = useLang();
 
   // ── Send message & consume SSE stream ─────────────────────────────────────
 
@@ -94,7 +96,6 @@ export default function Home() {
         let collectedText = "";
         let finalMeta: TutorMeta | undefined;
 
-        // Stream reading loop
         outer: while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -132,7 +133,6 @@ export default function Home() {
           }
         }
 
-        // Finalise message (remove streaming cursor, attach meta)
         setMessages((prev) =>
           prev.map((m) =>
             m.id === streamingIdRef.current
@@ -141,7 +141,6 @@ export default function Home() {
           )
         );
 
-        // Update corrections count
         if (finalMeta && finalMeta.corrections.length > 0) {
           setStats((prev) => ({
             ...prev,
@@ -149,13 +148,11 @@ export default function Home() {
           }));
         }
 
-        // Auto-play TTS
         if (settings.autoPlay && collectedText) {
           speak(collectedText, settings.speechRate);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
-        // Remove the empty streaming message
         setMessages((prev) => prev.filter((m) => m.id !== streamingIdRef.current));
       } finally {
         setIsStreaming(false);
@@ -193,8 +190,6 @@ export default function Home() {
     setError(null);
   }, []);
 
-  // ── Key handler for text area ───────────────────────────────────────────────
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -212,7 +207,6 @@ export default function Home() {
       />
 
       <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Conversation */}
         <ConversationView
           messages={messages}
           currentScenario={currentScenario}
@@ -223,10 +217,10 @@ export default function Home() {
 
         {/* Error */}
         {error && (
-          <div className="mx-4 mb-2 flex items-start gap-2 rounded-xl bg-red-500/10 p-3 text-sm text-red-400 ring-1 ring-red-500/20">
+          <div className="mx-4 mb-2 flex items-start gap-2 rounded-xl bg-red-500/10 p-3 text-sm text-red-500 ring-1 ring-red-500/20 dark:text-red-400">
             <span>⚠️</span>
             <div className="flex-1">
-              <p className="font-medium">Oops, something went wrong</p>
+              <p className="font-medium">{t.errorTitle}</p>
               <p className="text-xs text-red-400/80">{error}</p>
             </div>
             <button onClick={() => setError(null)} className="text-red-400/60 hover:text-red-400">
@@ -238,7 +232,6 @@ export default function Home() {
         {/* Input bar */}
         <div className="mx-4 mb-2 md:mx-6">
           <div className="glass flex items-end gap-3 rounded-2xl p-3 md:p-4">
-            {/* Mic button */}
             <MicButton
               onTranscriptReady={(text) => {
                 setTextInput((prev) => (prev ? prev + " " + text : text));
@@ -246,24 +239,22 @@ export default function Home() {
               disabled={isStreaming}
             />
 
-            {/* Text area */}
             <textarea
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type your message… (Enter to send, Shift+Enter for new line)"
+              placeholder={t.placeholder}
               rows={1}
               disabled={isStreaming}
-              className="min-h-[44px] flex-1 resize-none rounded-xl bg-white/5 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:bg-white/8 focus:ring-1 focus:ring-indigo-500/50 disabled:cursor-not-allowed"
+              className="min-h-[44px] flex-1 resize-none rounded-xl bg-black/5 px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none transition focus:bg-black/8 focus:ring-1 focus:ring-indigo-500/50 disabled:cursor-not-allowed dark:bg-white/5 dark:text-slate-100 dark:placeholder-slate-500 dark:focus:bg-white/8"
               style={{ maxHeight: "120px" }}
               onInput={(e) => {
-                const t = e.currentTarget;
-                t.style.height = "auto";
-                t.style.height = `${Math.min(t.scrollHeight, 120)}px`;
+                const target = e.currentTarget;
+                target.style.height = "auto";
+                target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
               }}
             />
 
-            {/* Send */}
             <button
               onClick={() => sendMessage(textInput)}
               disabled={!textInput.trim() || isStreaming}

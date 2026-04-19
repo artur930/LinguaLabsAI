@@ -4,7 +4,9 @@ module.exports = {
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./hooks/**/*.{js,ts,jsx,tsx,mdx}",
+    "./lib/**/*.{js,ts,jsx,tsx}",
   ],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
@@ -17,10 +19,10 @@ module.exports = {
           900: "#1e1b4b",
         },
         surface: {
-          900: "#0f0f1a",
-          800: "#13131f",
-          700: "#1a1a2e",
-          600: "#1f1f35",
+          900: "var(--surface-900)",
+          800: "var(--surface-800)",
+          700: "var(--surface-700)",
+          600: "var(--surface-600)",
         },
       },
       animation: {
