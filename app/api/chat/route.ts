@@ -1,163 +1,159 @@
 import { NextRequest } from "next/server";
-import { getClient, MODEL } from "@/lib/claude";
 import { buildSystemPrompt } from "@/lib/tutorPrompt";
 import { Message, Settings, Correction, VocabularyWord } from "@/types";
 
-const REPLY_OPEN = "<REPLY>";
-const REPLY_CLOSE = "</REPLY>";
-const META_OPEN = "<META>";
-const META_CLOSE = "</META>";
+// Models to try in order (fallback chain)
+const MODELS = [
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-latest",
+      ];
 
-export async function POST(req: NextRequest) {
-      const {
-              messages,
-              settings,
-              scenarioContext,
-      }: { messages: Message[]; settings: Settings; scenarioContext?: string } =
-              await req.json();
+interface GeminiResponse {
+        candidates?: Array<{
+                  content?: {
+                              parts?: Array<{ text?: string }>;
+                  };
+        }>;
+        error?: { message: string; code: number };
+}
 
-  const systemPrompt = buildSystemPrompt(settings, scenarioContext);
-
-  // Gemini requires history to alternate user/model and start with 'user'.
-  // The last message is sent separately via sendMessageStream.
-  const historyMessages = messages.slice(0, -1);
-      const lastMessage = messages[messages.length - 1];
-
-  const rawHistory = historyMessages.map((m) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
+async function callGemini(
+        apiKey: string,
+        model: string,
+        systemPrompt: string,
+        messages: Message[]
+      ): Promise<string> {
+        // Build contents array for Gemini REST API
+  const contents = messages.map((m) => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }],
   }));
 
-  // Drop leading model turns — Gemini requires history to start with user role
-  let startIdx = 0;
-      while (startIdx < rawHistory.length && rawHistory[startIdx].role !== "user") {
-              startIdx++;
-      }
-      const geminiHistory = rawHistory.slice(startIdx);
+  // Ensure starts with user role
+  while (contents.length > 0 && contents[0].role !== "user") {
+            contents.shift();
+  }
 
-  const encoder = new TextEncoder();
-      function encodeEvent(data: object): Uint8Array {
-              return encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
-      }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                        system_instruction: { parts: [{ text: systemPrompt }] },
+                        contents,
+                        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+            }),
+  });
+
+  const data: GeminiResponse = await res.json();
+
+  if (!res.ok || data.error) {
+            const msg = data.error?.message ?? `HTTP ${res.status}`;
+            // Throw with status so caller can decide to retry
+          const err = new Error(msg) as Error & { status?: number };
+            err.status = data.error?.code ?? res.status;
+            throw err;
+  }
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Empty response from Gemini");
+        return text;
+}
+
+function parseReply(raw: string): { reply: string; corrections: Correction[]; vocabulary: VocabularyWord | null } {
+        // Try to parse structured XML response first
+  const replyMatch = raw.match(/<REPLY>([\s\S]*?)<\/REPLY>/);
+        const metaMatch = raw.match(/<META>([\s\S]*?)<\/META>/);
+
+  let reply = replyMatch ? replyMatch[1].trim() : raw.trim();
+        let corrections: Correction[] = [];
+        let vocabulary: VocabularyWord | null = null;
+
+  if (metaMatch) {
+            try {
+                        const meta = JSON.parse(metaMatch[1].trim());
+                        corrections = meta.corrections ?? [];
+                        vocabulary = meta.vocabulary ?? null;
+            } catch {
+                        // ignore parse errors
+            }
+  }
+
+  return { reply, corrections, vocabulary };
+}
+
+export async function POST(req: NextRequest) {
+        const encoder = new TextEncoder();
+
+  const send = (data: object) =>
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
 
   const stream = new ReadableStream({
-          async start(controller) {
-                    try {
-                                const client = getClient();
-                                const model = client.getGenerativeModel({
-                                              model: MODEL,
-                                              systemInstruction: systemPrompt,
-                                });
+            async start(controller) {
+                        try {
+                                      const { messages, settings, scenarioContext }: {
+                                                      messages: Message[];
+                                                      settings: Settings;
+                                                      scenarioContext?: string;
+                                      } = await req.json();
 
-                      const chat = model.startChat({ history: geminiHistory });
+                          const apiKey = process.env.GEMINI_API_KEY;
+                                      if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
-                      type Phase = "seeking_reply" | "in_reply" | "seeking_meta" | "in_meta";
-                                let phase: Phase = "seeking_reply";
-                                let buffer = "";
-                                let jsonBuffer = "";
+                          const systemPrompt = buildSystemPrompt(settings, scenarioContext);
 
-                      const result = await chat.sendMessageStream(lastMessage.content);
+                          let rawText: string | null = null;
+                                      let lastError: Error | null = null;
 
-                      for await (const chunk of result.stream) {
-                                    const text = chunk.text();
-                                    if (!text) continue;
-                                    buffer += text;
+                          // Try each model in order until one works
+                          for (const model of MODELS) {
+                                          try {
+                                                            rawText = await callGemini(apiKey, model, systemPrompt, messages);
+                                                            break;
+                                          } catch (err) {
+                                                            lastError = err as Error;
+                                                            const status = (err as Error & { status?: number }).status;
+                                                            // Only retry on quota/rate errors (429) or model not found (404)
+                                            if (status === 429 || status === 404) {
+                                                                console.warn(`[/api/chat] model ${model} failed (${status}), trying next`);
+                                                                continue;
+                                            }
+                                                            throw err;
+                                          }
+                          }
 
-                                  let keepGoing = true;
-                                    while (keepGoing) {
-                                                    keepGoing = false;
+                          if (rawText === null) {
+                                          throw lastError ?? new Error("All models failed");
+                          }
 
-                                      if (phase === "seeking_reply") {
-                                                        const idx = buffer.indexOf(REPLY_OPEN);
-                                                        if (idx !== -1) {
-                                                                            buffer = buffer.slice(idx + REPLY_OPEN.length);
-                                                                            if (buffer.startsWith("\n")) buffer = buffer.slice(1);
-                                                                            phase = "in_reply";
-                                                                            keepGoing = true;
-                                                        } else if (buffer.length > REPLY_OPEN.length) {
-                                                                            phase = "in_reply";
-                                                                            keepGoing = true;
-                                                        }
+                          const { reply, corrections, vocabulary } = parseReply(rawText);
+
+                          // Stream the reply word by word for a typing effect
+                          const words = reply.split(" ");
+                                      for (let i = 0; i < words.length; i++) {
+                                                      const chunk = (i === 0 ? "" : " ") + words[i];
+                                                      controller.enqueue(send({ type: "text", content: chunk }));
                                       }
 
-                                      if (phase === "in_reply") {
-                                                        const closeIdx = buffer.indexOf(REPLY_CLOSE);
-                                                        if (closeIdx !== -1) {
-                                                                            const txt = buffer.slice(0, closeIdx);
-                                                                            if (txt) controller.enqueue(encodeEvent({ type: "text", content: txt }));
-                                                                            buffer = buffer.slice(closeIdx + REPLY_CLOSE.length);
-                                                                            phase = "seeking_meta";
-                                                                            keepGoing = true;
-                                                        } else {
-                                                                            const safeLen = Math.max(0, buffer.length - REPLY_CLOSE.length);
-                                                                            if (safeLen > 0) {
-                                                                                                  controller.enqueue(encodeEvent({ type: "text", content: buffer.slice(0, safeLen) }));
-                                                                                                  buffer = buffer.slice(safeLen);
-                                                                            }
-                                                        }
-                                      }
-
-                                      if (phase === "seeking_meta") {
-                                                        const idx = buffer.indexOf(META_OPEN);
-                                                        if (idx !== -1) {
-                                                                            buffer = buffer.slice(idx + META_OPEN.length);
-                                                                            if (buffer.startsWith("\n")) buffer = buffer.slice(1);
-                                                                            phase = "in_meta";
-                                                                            keepGoing = true;
-                                                        } else if (buffer.length > META_OPEN.length) {
-                                                                            keepGoing = false;
-                                                        }
-                                      }
-
-                                      if (phase === "in_meta") {
-                                                        const closeIdx = buffer.indexOf(META_CLOSE);
-                                                        if (closeIdx !== -1) {
-                                                                            jsonBuffer += buffer.slice(0, closeIdx);
-                                                                            try {
-                                                                                                  const parsed = JSON.parse(jsonBuffer.trim()) as {
-                                                                                                                          corrections?: Correction[];
-                                                                                                                          vocabulary?: VocabularyWord | null;
-                                                                                                      };
-                                                                                                  controller.enqueue(encodeEvent({
-                                                                                                                          type: "meta",
-                                                                                                                          corrections: parsed.corrections ?? [],
-                                                                                                                          vocabulary: parsed.vocabulary ?? null,
-                                                                                                      }));
-                                                                            } catch {
-                                                                                                  controller.enqueue(encodeEvent({ type: "meta", corrections: [], vocabulary: null }));
-                                                                            }
-                                                                            buffer = "";
-                                                                            keepGoing = false;
-                                                        } else {
-                                                                            jsonBuffer += buffer;
-                                                                            buffer = "";
-                                                        }
-                                      }
-                                    }
-                      }
-
-                      if (phase === "in_reply" && buffer.trim()) {
-                                    controller.enqueue(encodeEvent({ type: "text", content: buffer }));
-                      }
-                                if (phase !== "in_meta") {
-                                              controller.enqueue(encodeEvent({ type: "meta", corrections: [], vocabulary: null }));
-                                }
-                                controller.enqueue(encodeEvent({ type: "done" }));
-                                controller.close();
-                    } catch (err) {
-                                const message = err instanceof Error ? err.message : "Unknown error";
-                                console.error("[/api/chat]", message);
-                                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", message })}\n\n`));
-                                controller.close();
-                    }
-          },
+                          controller.enqueue(send({ type: "meta", corrections, vocabulary }));
+                                      controller.enqueue(send({ type: "done" }));
+                                      controller.close();
+                        } catch (err) {
+                                      const message = err instanceof Error ? err.message : "Unknown error";
+                                      console.error("[/api/chat]", message);
+                                      controller.enqueue(send({ type: "error", message }));
+                                      controller.close();
+                        }
+            },
   });
 
   return new Response(stream, {
-          headers: {
-                    "Content-Type": "text/event-stream",
-                    "Cache-Control": "no-cache",
-                    Connection: "keep-alive",
-          },
+            headers: {
+                        "Content-Type": "text/event-stream",
+                        "Cache-Control": "no-cache",
+                        Connection: "keep-alive",
+            },
   });
 }
