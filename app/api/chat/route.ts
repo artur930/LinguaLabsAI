@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest } from "next/server"; // Anthropic streaming route
 import { getClient, MODEL } from "@/lib/claude";
 import { buildSystemPrompt } from "@/lib/tutorPrompt";
 import { Message, Settings, Correction, VocabularyWord } from "@/types";
