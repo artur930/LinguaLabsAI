@@ -1,13 +1,17 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Singleton Anthropic client — constructed once per server process
-let _client: Anthropic | null = null;
+// Singleton Gemini client — constructed once per server process
+let _client: GoogleGenerativeAI | null = null;
 
-export function getClient(): Anthropic {
-  if (!_client) {
-    _client = new Anthropic();
-  }
-  return _client;
+export function getClient(): GoogleGenerativeAI {
+    if (!_client) {
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) {
+                  throw new Error("GEMINI_API_KEY environment variable is not set");
+          }
+          _client = new GoogleGenerativeAI(apiKey);
+    }
+    return _client;
 }
 
-export const MODEL = "claude-sonnet-4-6" as const;
+export const MODEL = "gemini-2.0-flash" as const;
